@@ -3,6 +3,7 @@
 #include <wincodec.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -17,8 +18,30 @@ constexpr int kRows = 9;
 constexpr UINT_PTR kAnimTimer = 1;
 constexpr UINT kPetMenuBase = 1000;
 constexpr UINT kPetMenuQuit = 9000;
+constexpr int kDragDirectionThresholdPx = 8;
+constexpr DWORD kDragDirectionLockMs = 220;
 constexpr int kIdleFrames[] = {0, 1, 2, 3, 4, 5};
 constexpr UINT kIdleDurationsMs[] = {1680, 660, 660, 840, 840, 1920};
+
+enum class PetAnimState {
+  Idle,
+  RunningRight,
+  RunningLeft,
+  Waving,
+  Jumping,
+  Failed,
+  Waiting,
+  Running,
+  Review,
+};
+
+struct AnimationDef {
+  int row = 0;
+  int frame_count = 1;
+  UINT frame_ms = 140;
+  UINT last_frame_ms = 240;
+  bool loop = true;
+};
 
 struct Image {
   UINT width = 0;
@@ -34,9 +57,14 @@ struct Host {
   std::wstring asset_root;
   std::wstring config_dir;
   Image sheet;
-  int idle_index = 0;
+  PetAnimState anim_state = PetAnimState::Idle;
+  int frame_index = 0;
   bool dragging = false;
   POINT drag_offset{};
+  POINT last_drag_cursor{};
+  bool has_last_drag_cursor = false;
+  int drag_dx_accum = 0;
+  DWORD drag_direction_locked_until = 0;
 };
 
 std::wstring widen(const wchar_t* value) {
@@ -50,6 +78,131 @@ double dpiScaleForWindow(HWND hwnd) {
 
 int dipToPhysical(HWND hwnd, int value) {
   return static_cast<int>(value * dpiScaleForWindow(hwnd) + 0.5);
+}
+
+std::filesystem::path desktopStatePath(const Host* host) {
+  return std::filesystem::path(host->config_dir) / L"desktop-state.json";
+}
+
+bool parseJsonInt(const std::string& text, const char* key, int* out) {
+  if (!key || !out) return false;
+  const std::string quoted = std::string("\"") + key + "\"";
+  const size_t key_pos = text.find(quoted);
+  if (key_pos == std::string::npos) return false;
+  const size_t colon = text.find(':', key_pos + quoted.size());
+  if (colon == std::string::npos) return false;
+
+  const char* start = text.c_str() + colon + 1;
+  char* end = nullptr;
+  const long value = std::strtol(start, &end, 10);
+  if (end == start) return false;
+  *out = static_cast<int>(value);
+  return true;
+}
+
+std::wstring parseJsonString(const std::string& text, const char* key) {
+  if (!key) return std::wstring();
+  const std::string quoted = std::string("\"") + key + "\"";
+  const size_t key_pos = text.find(quoted);
+  if (key_pos == std::string::npos) return std::wstring();
+  const size_t colon = text.find(':', key_pos + quoted.size());
+  if (colon == std::string::npos) return std::wstring();
+  const size_t open = text.find('"', colon + 1);
+  if (open == std::string::npos) return std::wstring();
+  const size_t close = text.find('"', open + 1);
+  if (close == std::string::npos) return std::wstring();
+
+  const std::string value = text.substr(open + 1, close - open - 1);
+  if (value.empty()) return std::wstring();
+  const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.c_str(), static_cast<int>(value.size()), nullptr, 0);
+  if (len <= 0) return std::wstring(value.begin(), value.end());
+  std::wstring wide(static_cast<size_t>(len), L'\0');
+  MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.c_str(), static_cast<int>(value.size()), wide.data(), len);
+  return wide;
+}
+
+struct MonitorSearch {
+  RECT rect{};
+  bool visible = false;
+};
+
+BOOL CALLBACK monitorIntersectsRect(HMONITOR monitor, HDC, LPRECT, LPARAM data) {
+  auto* search = reinterpret_cast<MonitorSearch*>(data);
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (!GetMonitorInfoW(monitor, &info)) return TRUE;
+
+  RECT intersection{};
+  if (IntersectRect(&intersection, &search->rect, &info.rcWork)) {
+    const int width = intersection.right - intersection.left;
+    const int height = intersection.bottom - intersection.top;
+    if (width >= 16 && height >= 16) {
+      search->visible = true;
+      return FALSE;
+    }
+  }
+  return TRUE;
+}
+
+bool windowRectVisibleOnAnyMonitor(const RECT& rect) {
+  MonitorSearch search{rect, false};
+  EnumDisplayMonitors(nullptr, nullptr, monitorIntersectsRect, reinterpret_cast<LPARAM>(&search));
+  return search.visible;
+}
+
+POINT fallbackPosition(int width_px, int height_px) {
+  RECT work{};
+  if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) {
+    return POINT{kDefaultX, kDefaultY};
+  }
+
+  constexpr int margin = 48;
+  const int x = std::max(work.left + margin, work.right - width_px - margin);
+  const int y = std::max(work.top + margin, work.bottom - height_px - margin);
+  return POINT{x, y};
+}
+
+POINT initialWindowPosition(const Host* host, int width_px, int height_px) {
+  if (!host) return POINT{kDefaultX, kDefaultY};
+
+  std::ifstream state(desktopStatePath(host));
+  std::string text((std::istreambuf_iterator<char>(state)), std::istreambuf_iterator<char>());
+  int x = 0;
+  int y = 0;
+  if (parseJsonInt(text, "x", &x) && parseJsonInt(text, "y", &y)) {
+    RECT rect{x, y, x + width_px, y + height_px};
+    if (windowRectVisibleOnAnyMonitor(rect)) return POINT{x, y};
+  }
+
+  return fallbackPosition(width_px, height_px);
+}
+
+void saveWindowPosition(Host* host) {
+  if (!host || !host->hwnd || host->config_dir.empty()) return;
+
+  RECT rect{};
+  if (!GetWindowRect(host->hwnd, &rect)) return;
+
+  std::error_code ec;
+  std::filesystem::create_directories(std::filesystem::path(host->config_dir), ec);
+
+  std::ofstream state(desktopStatePath(host), std::ios::trunc);
+  if (!state) return;
+  state << "{\n"
+        << "  \"version\": 1,\n"
+        << "  \"window\": {\n"
+        << "    \"x\": " << rect.left << ",\n"
+        << "    \"y\": " << rect.top << "\n"
+        << "  }\n"
+        << "}\n";
+}
+
+std::wstring readActiveSlug(const Host* host) {
+  if (!host || host->config_dir.empty()) return std::wstring();
+  std::ifstream active(std::filesystem::path(host->config_dir) / L"active.json");
+  if (!active) return std::wstring();
+  const std::string text((std::istreambuf_iterator<char>(active)), std::istreambuf_iterator<char>());
+  return parseJsonString(text, "slug");
 }
 
 bool loadImageWic(const std::filesystem::path& path, Image* out) {
@@ -100,6 +253,57 @@ bool loadSpritesheet(Host* host) {
   const auto root = std::filesystem::path(host->asset_root);
   if (loadImageWic(root / L"spritesheet.webp", &host->sheet)) return true;
   return loadImageWic(root / L"spritesheet.png", &host->sheet);
+}
+
+void render(Host* host);
+
+AnimationDef animationDef(PetAnimState state) {
+  switch (state) {
+    case PetAnimState::Idle:
+      return AnimationDef{0, 6, 280, 320, true};
+    case PetAnimState::RunningRight:
+      return AnimationDef{1, 8, 120, 220, true};
+    case PetAnimState::RunningLeft:
+      return AnimationDef{2, 8, 120, 220, true};
+    case PetAnimState::Waving:
+      return AnimationDef{3, 4, 140, 280, false};
+    case PetAnimState::Jumping:
+      return AnimationDef{4, 5, 140, 280, false};
+    case PetAnimState::Failed:
+      return AnimationDef{5, 8, 140, 240, false};
+    case PetAnimState::Waiting:
+      return AnimationDef{6, 6, 150, 260, true};
+    case PetAnimState::Running:
+      return AnimationDef{7, 6, 120, 220, true};
+    case PetAnimState::Review:
+      return AnimationDef{8, 6, 150, 280, true};
+  }
+  return AnimationDef{};
+}
+
+UINT frameDurationMs(const Host* host) {
+  if (!host) return 140;
+  if (host->anim_state == PetAnimState::Idle) {
+    const int idle_index = std::clamp(host->frame_index, 0, static_cast<int>(sizeof(kIdleDurationsMs) / sizeof(kIdleDurationsMs[0])) - 1);
+    return kIdleDurationsMs[idle_index];
+  }
+
+  const AnimationDef def = animationDef(host->anim_state);
+  return host->frame_index >= def.frame_count - 1 ? def.last_frame_ms : def.frame_ms;
+}
+
+void scheduleNextFrame(Host* host) {
+  if (!host || !host->hwnd) return;
+  SetTimer(host->hwnd, kAnimTimer, frameDurationMs(host), nullptr);
+}
+
+void setAnimation(Host* host, PetAnimState state, bool restart) {
+  if (!host) return;
+  if (!restart && host->anim_state == state) return;
+  host->anim_state = state;
+  host->frame_index = 0;
+  render(host);
+  scheduleNextFrame(host);
 }
 
 void drawFrameBgra(
@@ -165,7 +369,13 @@ void render(Host* host) {
 
   const int frame_w = static_cast<int>(host->sheet.width / kCols);
   const int frame_h = static_cast<int>(host->sheet.height / kRows);
-  const int frame_x = std::clamp(kIdleFrames[host->idle_index], 0, kCols - 1) * frame_w;
+  const AnimationDef anim = animationDef(host->anim_state);
+  const int row = std::clamp(anim.row, 0, kRows - 1);
+  const int col = host->anim_state == PetAnimState::Idle
+      ? std::clamp(kIdleFrames[std::clamp(host->frame_index, 0, static_cast<int>(sizeof(kIdleFrames) / sizeof(kIdleFrames[0])) - 1)], 0, kCols - 1)
+      : std::clamp(host->frame_index, 0, kCols - 1);
+  const int frame_x = col * frame_w;
+  const int frame_y = row * frame_h;
   drawFrameBgra(
       static_cast<unsigned char*>(dst_bits),
       physical_w,
@@ -176,7 +386,7 @@ void render(Host* host) {
       pet_h,
       host->sheet,
       frame_x,
-      0,
+      frame_y,
       frame_w,
       frame_h);
 
@@ -210,6 +420,76 @@ void syncInputWindow(Host* host) {
       SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
+void advanceAnimation(Host* host) {
+  if (!host) return;
+  const AnimationDef def = animationDef(host->anim_state);
+  if (host->frame_index + 1 >= def.frame_count) {
+    if (def.loop) {
+      host->frame_index = 0;
+    } else {
+      setAnimation(host, PetAnimState::Idle, true);
+      return;
+    }
+  } else {
+    host->frame_index += 1;
+  }
+  render(host);
+  scheduleNextFrame(host);
+}
+
+void beginDrag(Host* host, HWND capture_hwnd) {
+  if (!host || !host->hwnd) return;
+  POINT cursor{};
+  RECT rect{};
+  GetCursorPos(&cursor);
+  GetWindowRect(host->hwnd, &rect);
+  host->dragging = true;
+  host->drag_offset.x = cursor.x - rect.left;
+  host->drag_offset.y = cursor.y - rect.top;
+  host->last_drag_cursor = cursor;
+  host->has_last_drag_cursor = true;
+  host->drag_dx_accum = 0;
+  host->drag_direction_locked_until = 0;
+  SetCapture(capture_hwnd);
+  setAnimation(host, PetAnimState::Running, true);
+}
+
+void updateDragAnimation(Host* host, const POINT& cursor) {
+  if (!host) return;
+  if (!host->has_last_drag_cursor) {
+    host->last_drag_cursor = cursor;
+    host->has_last_drag_cursor = true;
+    return;
+  }
+
+  const int dx = cursor.x - host->last_drag_cursor.x;
+  host->last_drag_cursor = cursor;
+  host->drag_dx_accum += dx;
+
+  const DWORD now = GetTickCount();
+  if (now < host->drag_direction_locked_until) return;
+
+  if (host->drag_dx_accum >= kDragDirectionThresholdPx) {
+    setAnimation(host, PetAnimState::RunningRight, false);
+    host->drag_dx_accum = 0;
+    host->drag_direction_locked_until = now + kDragDirectionLockMs;
+  } else if (host->drag_dx_accum <= -kDragDirectionThresholdPx) {
+    setAnimation(host, PetAnimState::RunningLeft, false);
+    host->drag_dx_accum = 0;
+    host->drag_direction_locked_until = now + kDragDirectionLockMs;
+  }
+}
+
+void finishDrag(Host* host) {
+  if (!host || !host->dragging) return;
+  saveWindowPosition(host);
+  host->dragging = false;
+  host->has_last_drag_cursor = false;
+  host->drag_dx_accum = 0;
+  host->drag_direction_locked_until = 0;
+  setAnimation(host, PetAnimState::Waving, true);
+}
+
 std::vector<std::wstring> petSlugs(const std::wstring& asset_root) {
   std::vector<std::wstring> slugs;
   for (const auto& entry : std::filesystem::directory_iterator(asset_root)) {
@@ -238,17 +518,22 @@ void activatePet(Host* host, const std::wstring& slug) {
   std::wofstream active(std::filesystem::path(host->config_dir) / L"active.json", std::ios::trunc);
   if (active) active << L"{\"slug\":\"" << slug << L"\"}\n";
   loadSpritesheet(host);
-  host->idle_index = 0;
-  render(host);
+  setAnimation(host, PetAnimState::Waving, true);
 }
 
 void showMenu(Host* host) {
   if (!host || !host->hwnd) return;
   const auto slugs = petSlugs(host->asset_root);
+  std::wstring active_slug = readActiveSlug(host);
+  if (active_slug.empty() && !slugs.empty()) active_slug = slugs[0];
+
   HMENU menu = CreatePopupMenu();
   if (!menu) return;
   UINT id = kPetMenuBase;
-  for (const auto& slug : slugs) AppendMenuW(menu, MF_STRING, id++, slug.c_str());
+  for (const auto& slug : slugs) {
+    const UINT flags = MF_STRING | (slug == active_slug ? MF_CHECKED : MF_UNCHECKED);
+    AppendMenuW(menu, flags, id++, slug.c_str());
+  }
   if (!slugs.empty()) AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kPetMenuQuit, L"Quit");
   POINT cursor{};
@@ -272,21 +557,13 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     case WM_NCHITTEST:
       return HTCLIENT;
     case WM_LBUTTONDOWN:
-      if (host) {
-        POINT cursor{};
-        RECT rect{};
-        GetCursorPos(&cursor);
-        GetWindowRect(hwnd, &rect);
-        host->dragging = true;
-        host->drag_offset.x = cursor.x - rect.left;
-        host->drag_offset.y = cursor.y - rect.top;
-        SetCapture(hwnd);
-      }
+      beginDrag(host, hwnd);
       return 0;
     case WM_MOUSEMOVE:
       if (host && host->dragging && (wparam & MK_LBUTTON)) {
         POINT cursor{};
         GetCursorPos(&cursor);
+        updateDragAnimation(host, cursor);
         SetWindowPos(
             hwnd,
             HWND_TOPMOST,
@@ -300,7 +577,13 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       return 0;
     case WM_LBUTTONUP:
     case WM_CAPTURECHANGED:
-      if (host) host->dragging = false;
+      if (msg == WM_LBUTTONUP) finishDrag(host);
+      else if (host) {
+        host->dragging = false;
+        host->has_last_drag_cursor = false;
+        host->drag_dx_accum = 0;
+        host->drag_direction_locked_until = 0;
+      }
       if (msg == WM_LBUTTONUP && GetCapture() == hwnd) ReleaseCapture();
       return 0;
     case WM_NCRBUTTONUP:
@@ -309,9 +592,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       return 0;
     case WM_TIMER:
       if (host && wparam == kAnimTimer) {
-        host->idle_index = (host->idle_index + 1) % (sizeof(kIdleFrames) / sizeof(kIdleFrames[0]));
-        render(host);
-        SetTimer(hwnd, kAnimTimer, kIdleDurationsMs[host->idle_index], nullptr);
+        advanceAnimation(host);
       }
       return 0;
     case WM_DPICHANGED:
@@ -322,6 +603,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
           SetWindowPos(hwnd, HWND_TOPMOST, suggested->left, suggested->top, MulDiv(host->width, dpi, 96), MulDiv(host->height, dpi, 96), SWP_NOACTIVATE);
         }
         render(host);
+        syncInputWindow(host);
       }
       return 0;
     case WM_DESTROY:
@@ -345,21 +627,23 @@ LRESULT CALLBACK inputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
     case WM_NCHITTEST:
       return HTCLIENT;
     case WM_LBUTTONDOWN:
+      beginDrag(host, hwnd);
+      return 0;
+    case WM_LBUTTONDBLCLK:
       if (host) {
-        POINT cursor{};
-        RECT rect{};
-        GetCursorPos(&cursor);
-        GetWindowRect(host->hwnd, &rect);
-        host->dragging = true;
-        host->drag_offset.x = cursor.x - rect.left;
-        host->drag_offset.y = cursor.y - rect.top;
-        SetCapture(hwnd);
+        host->dragging = false;
+        host->has_last_drag_cursor = false;
+        host->drag_dx_accum = 0;
+        host->drag_direction_locked_until = 0;
+        if (GetCapture() == hwnd) ReleaseCapture();
+        setAnimation(host, PetAnimState::Jumping, true);
       }
       return 0;
     case WM_MOUSEMOVE:
       if (host && host->dragging && (wparam & MK_LBUTTON)) {
         POINT cursor{};
         GetCursorPos(&cursor);
+        updateDragAnimation(host, cursor);
         const int x = cursor.x - host->drag_offset.x;
         const int y = cursor.y - host->drag_offset.y;
         SetWindowPos(host->hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
@@ -368,7 +652,13 @@ LRESULT CALLBACK inputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
       return 0;
     case WM_LBUTTONUP:
     case WM_CAPTURECHANGED:
-      if (host) host->dragging = false;
+      if (msg == WM_LBUTTONUP) finishDrag(host);
+      else if (host) {
+        host->dragging = false;
+        host->has_last_drag_cursor = false;
+        host->drag_dx_accum = 0;
+        host->drag_direction_locked_until = 0;
+      }
       if (msg == WM_LBUTTONUP && GetCapture() == hwnd) ReleaseCapture();
       return 0;
     case WM_RBUTTONUP:
@@ -392,6 +682,7 @@ bool registerClass(HINSTANCE hinst) {
 
   WNDCLASSEXW input_wc{};
   input_wc.cbSize = sizeof(input_wc);
+  input_wc.style = CS_DBLCLKS;
   input_wc.lpfnWndProc = inputWndProc;
   input_wc.hInstance = hinst;
   input_wc.lpszClassName = L"PetdexNativeInputWindow";
@@ -417,15 +708,18 @@ extern "C" Host* petdex_native_create(const wchar_t* asset_root, const wchar_t* 
   }
 
   const UINT dpi = GetDpiForSystem();
+  const int initial_w = MulDiv(width, dpi, 96);
+  const int initial_h = MulDiv(height, dpi, 96);
+  const POINT initial_pos = initialWindowPosition(host, initial_w, initial_h);
   host->hwnd = CreateWindowExW(
       WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
       L"PetdexNativeWindow",
       L"Petdex",
       WS_POPUP,
-      kDefaultX,
-      kDefaultY,
-      MulDiv(width, dpi, 96),
-      MulDiv(height, dpi, 96),
+      initial_pos.x,
+      initial_pos.y,
+      initial_w,
+      initial_h,
       nullptr,
       nullptr,
       hinst,
@@ -439,10 +733,10 @@ extern "C" Host* petdex_native_create(const wchar_t* asset_root, const wchar_t* 
       L"PetdexNativeInputWindow",
       L"PetdexInput",
       WS_POPUP,
-      kDefaultX,
-      kDefaultY,
-      MulDiv(width, dpi, 96),
-      MulDiv(height, dpi, 96),
+      initial_pos.x,
+      initial_pos.y,
+      initial_w,
+      initial_h,
       nullptr,
       nullptr,
       hinst,
@@ -471,9 +765,8 @@ extern "C" int petdex_native_run(Host* host) {
 
   ShowWindow(host->hwnd, SW_SHOWNOACTIVATE);
   ShowWindow(host->input_hwnd, SW_SHOWNOACTIVATE);
-  render(host);
   syncInputWindow(host);
-  SetTimer(host->hwnd, kAnimTimer, kIdleDurationsMs[0], nullptr);
+  setAnimation(host, PetAnimState::Waving, true);
 
   MSG msg{};
   while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
