@@ -47,6 +47,8 @@ pub fn runWithOptions(app: zero_native.App, options: RunOptions, init: std.proce
         try runMacos(app, options, init);
     } else if (comptime std.mem.eql(u8, build_options.platform, "linux")) {
         try runLinux(app, options, init);
+    } else if (comptime std.mem.eql(u8, build_options.platform, "win32")) {
+        try runWindows(app, options, init);
     } else {
         try runNull(app, options, init);
     }
@@ -143,6 +145,40 @@ fn runLinux(app: zero_native.App, options: RunOptions, init: std.process.Init) !
     }
     var runtime = zero_native.Runtime.init(.{
         .platform = linux_platform.platform(),
+        .trace_sink = runtime_trace_sink,
+        .log_path = if (log_setup) |setup| setup.paths.log_file else null,
+        .bridge = options.bridge,
+        .builtin_bridge = options.builtin_bridge,
+        .js_window_api = options.js_window_api,
+        .security = options.security,
+        .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
+        .window_state_store = store,
+    });
+
+    try runtime.run(app);
+}
+
+fn runWindows(app: zero_native.App, options: RunOptions, init: std.process.Init) !void {
+    var buffers: StateBuffers = undefined;
+    var app_info = options.appInfo();
+    const store = prepareStateStore(init.io, init.environ_map, &app_info, &buffers);
+    var windows_platform = try zero_native.platform.windows.WindowsPlatform.initWithOptions(zero_native.geometry.SizeF.init(720, 480), webEngine(), app_info);
+    var trace_sink = StdoutTraceSink{};
+    var log_buffers: zero_native.debug.LogPathBuffers = .{};
+    const log_setup = zero_native.debug.setupLogging(init.io, init.environ_map, app_info.bundle_id, &log_buffers) catch null;
+    if (log_setup) |setup| zero_native.debug.installPanicCapture(init.io, setup.paths);
+    var file_trace_sink: zero_native.debug.FileTraceSink = undefined;
+    var fanout_sinks: [2]zero_native.trace.Sink = undefined;
+    var fanout_sink: zero_native.debug.FanoutTraceSink = undefined;
+    var runtime_trace_sink = trace_sink.sink();
+    if (log_setup) |setup| {
+        file_trace_sink = zero_native.debug.FileTraceSink.init(init.io, setup.paths.log_dir, setup.paths.log_file, setup.format);
+        fanout_sinks = .{ trace_sink.sink(), file_trace_sink.sink() };
+        fanout_sink = .{ .sinks = &fanout_sinks };
+        runtime_trace_sink = fanout_sink.sink();
+    }
+    var runtime = zero_native.Runtime.init(.{
+        .platform = windows_platform.platform(),
         .trace_sink = runtime_trace_sink,
         .log_path = if (log_setup) |setup| setup.paths.log_file else null,
         .bridge = options.bridge,

@@ -3,7 +3,7 @@
     .name = "Petdex",
     .display_name = "Petdex",
     .version = "0.2.0",
-    .platforms = .{ "macos" },
+    .platforms = .{ "macos", "windows" },
     .permissions = .{ "window" },
     .capabilities = .{ "webview", "js_bridge" },
     .security = .{

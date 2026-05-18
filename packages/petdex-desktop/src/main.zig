@@ -1,7 +1,9 @@
 const std = @import("std");
+const build_options = @import("build_options");
 
 extern fn getpid() c_int;
 const runner = @import("runner");
+const windows_native = @import("windows_native.zig");
 const zero_native = @import("zero-native");
 
 pub const panic = std.debug.FullPanic(zero_native.debug.capturePanic);
@@ -48,7 +50,7 @@ const html_head =
     \\  .pet {
     \\    aspect-ratio: 192 / 208;
     \\    width: 4.5rem;
-    \\    image-rendering: pixelated;
+    \\    image-rendering: auto;
     \\    background-image: url('spritesheet.webp');
     \\    background-repeat: no-repeat;
     \\    background-size: 800% 900%;
@@ -122,7 +124,7 @@ const html_head =
     \\  .menu .thumb {
     \\    width: 40px;
     \\    height: 40px;
-    \\    image-rendering: pixelated;
+    \\    image-rendering: auto;
     \\    background-repeat: no-repeat;
     \\    background-size: 800% 900%;
     \\    background-position: 0% 0%;
@@ -819,6 +821,7 @@ const html_tail =
     \\    dragging = false;
     \\    pet.classList.remove('dragging');
     \\    try { pet.releasePointerCapture(e.pointerId); } catch (_) {}
+    \\    try { window.zero.invoke('petdex.drag_end', {}); } catch (_) {}
     \\    const v = computeVelocity();
     \\    if (v != null && Math.hypot(v.x, v.y) >= MIN_VEL) throwWithVelocity(v.x, v.y);
     \\    else { play('waving'); resetTimer = setTimeout(() => play('idle'), 1200); }
@@ -833,6 +836,7 @@ const html_tail =
     \\  }
     \\  function closeMenu() {
     \\    if (menuEl) { menuEl.remove(); menuEl = null; }
+    \\    document.body.style.pointerEvents = '';
     \\    const data = window.__PETDEX__ || {};
     \\    if (data.compactWidth && data.compactHeight) resizeWindowTo(data.compactWidth, data.compactHeight);
     \\  }
@@ -944,7 +948,7 @@ const html_tail =
     \\  }
     \\  let virtualGrid = null;
     \\  function openMenu() {
-    \\    if (menuEl) { menuEl.remove(); menuEl = null; }
+    \\    if (menuEl) { closeMenu(); return; }
     \\    if (virtualGrid) { virtualGrid.dispose(); virtualGrid = null; }
     \\    const data = window.__PETDEX__ || { pets: [], active: null };
     \\    // Snapshot pet position BEFORE resize triggers any layout shift.
@@ -1015,6 +1019,7 @@ const html_tail =
     \\    menuEl.appendChild(scroller);
     \\    menuEl.appendChild(footer);
     \\    document.body.appendChild(menuEl);
+    \\    document.body.style.pointerEvents = 'auto';
     \\    virtualGrid = makeVirtualGrid(scroller, spacer, viewport, () => currentItems, () => data.active, selectPet);
     \\    applyFilter('');
     \\    positionMenuFromData(petRect);
@@ -1025,7 +1030,14 @@ const html_tail =
     \\  pet.addEventListener('contextmenu', (e) => {
     \\    e.preventDefault();
     \\    e.stopImmediatePropagation();
-    \\    openMenu();
+    \\    const data = window.__PETDEX__ || { pets: [], active: null };
+    \\    if (window.zero && window.zero.invoke) {
+    \\      window.zero.invoke('petdex.open_native_menu', { x: e.screenX, y: e.screenY, pets: data.pets, active: data.active }).then((r) => {
+    \\        if (!(r && r.native)) openMenu();
+    \\      }).catch(() => openMenu());
+    \\    } else {
+    \\      openMenu();
+    \\    }
     \\  });
     \\  // Prevent the system's default contextmenu anywhere (selection helpers, etc.)
     \\  document.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1672,6 +1684,10 @@ fn ensureDir(io: std.Io, path: []const u8) !void {
 // the mode is ignored; per-user isolation comes from the parent
 // directory living under %USERPROFILE%.
 fn ensurePrivateDir(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !void {
+    if (comptime std.mem.eql(u8, build_options.platform, "win32")) {
+        return ensureDir(io, path);
+    }
+
     const private_perms = std.Io.File.Permissions.fromMode(0o700);
     std.Io.Dir.createDirAbsolute(io, path, private_perms) catch |err| switch (err) {
         // If it already exists, tighten the mode in case a previous
@@ -1696,6 +1712,11 @@ fn pathExists(io: std.Io, absolute_path: []const u8) bool {
     return true;
 }
 
+fn homeDirFromEnv(env_map: *std.process.Environ.Map) ?[]const u8 {
+    if (env_map.get("HOME")) |home| return home;
+    return env_map.get("USERPROFILE");
+}
+
 // Returns every existing pets root in priority order. Callers must
 // own and free the inner slices. Empty result means no canonical
 // pets root exists at all (fresh install, or HOME without .petdex
@@ -1707,7 +1728,7 @@ fn pathExists(io: std.Io, absolute_path: []const u8) bool {
 // example) used to mask a populated ~/.codex/pets, and the binary
 // would exit "No pets". Reading both roots and merging fixes that.
 fn resolvePetsRoots(allocator: std.mem.Allocator, io: std.Io, env_map: *std.process.Environ.Map) ![][]u8 {
-    const home = env_map.get("HOME") orelse return error.NoHome;
+    const home = homeDirFromEnv(env_map) orelse return error.NoHome;
     var roots: std.ArrayList([]u8) = .empty;
     errdefer {
         for (roots.items) |r| allocator.free(r);
@@ -1729,7 +1750,7 @@ fn resolvePetsRoots(allocator: std.mem.Allocator, io: std.Io, env_map: *std.proc
 }
 
 fn resolveConfigDir(allocator: std.mem.Allocator, io: std.Io, env_map: *std.process.Environ.Map) ![]u8 {
-    const home = env_map.get("HOME") orelse return error.NoHome;
+    const home = homeDirFromEnv(env_map) orelse return error.NoHome;
     const dir = try std.fs.path.join(allocator, &.{ home, ".petdex" });
     try ensureDir(io, dir);
     return dir;
@@ -1750,7 +1771,7 @@ fn resolveSidecarDir(allocator: std.mem.Allocator, env_map: *std.process.Environ
     if (try resolveBundledSidecarDir(allocator)) |bundled| return bundled;
     // Bare-binary install path (legacy v0.1.0): the CLI installs the
     // sidecar bundle at ~/.petdex/sidecar/server.js.
-    const home = env_map.get("HOME") orelse return error.NoHome;
+    const home = homeDirFromEnv(env_map) orelse return error.NoHome;
     return try std.fs.path.join(allocator, &.{ home, ".petdex", "sidecar" });
 }
 
@@ -2416,6 +2437,11 @@ pub fn main(init: std.process.Init) !void {
     defer allocator.free(asset_root);
 
     try copyAllSpritesheets(allocator, init.io, asset_root, pets.items);
+
+    if (comptime std.mem.eql(u8, build_options.platform, "win32")) {
+        try windows_native.run(allocator, asset_root, config_dir);
+        return;
+    }
 
     // Spawn the HTTP sidecar so external CLIs (Claude Code, Codex, Gemini, OpenCode,
     // shell scripts) can drive the mascot via POST /state. The CLI installs
