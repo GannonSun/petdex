@@ -1,7 +1,7 @@
 export type BuildVersionUpdateReason = "version" | "asset-load";
 
 type Listener = (event: unknown) => void;
-type IntervalId = ReturnType<typeof window.setInterval>;
+type IntervalId = number;
 
 type BuildVersionMonitorOptions = {
   addDocumentListener: (type: string, listener: Listener) => void;
