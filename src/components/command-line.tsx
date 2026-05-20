@@ -33,21 +33,19 @@ type CommandLineProps = {
  * (without npx) so a user copying from a globally-installed
  * snippet still gets the latest tag.
  *
- * Only rewrites the FIRST occurrence — no risk of accidentally
- * rewriting embedded references in flags or paths.
+ * Rewrites each shell command segment so chained setup snippets keep
+ * every Petdex invocation on the newest release.
  */
 function pinToLatest(command: string): string {
-  // Already pinned? Leave it alone.
-  if (command.includes("petdex@")) return command;
-  // npx petdex ... → npx petdex@latest ...
-  const npxMatch = command.match(/^(.*?\bnpx\s+)petdex(\b.*)$/);
-  if (npxMatch) return `${npxMatch[1]}petdex@latest${npxMatch[2]}`;
-  // bare leading `petdex ...` (e.g. when the user has it on PATH)
-  // → `npx petdex@latest ...`. We add npx so the pinned form
-  // works even without a global install.
-  const bareMatch = command.match(/^petdex(\b.*)$/);
-  if (bareMatch) return `npx petdex@latest${bareMatch[1]}`;
-  return command;
+  return command
+    .split(/(\s*(?:&&|\|\||;|\|)\s*)/g)
+    .map((segment) => {
+      if (/^\s*(?:&&|\|\||;|\|)\s*$/.test(segment)) return segment;
+      return segment
+        .replace(/\bnpx\s+petdex(?!@)\b/g, "npx petdex@latest")
+        .replace(/^(\s*)petdex(?!@)\b/, "$1npx petdex@latest");
+    })
+    .join("");
 }
 
 async function writeClipboard(text: string) {

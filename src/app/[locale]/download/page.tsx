@@ -209,7 +209,7 @@ export default async function DownloadPage({
           </div>
 
           <DesktopActivationPreview
-            pendingLabel={pendingLabel}
+            pendingLabel={pendingPreviewName}
             pendingPet={
               pendingPreviewPet
                 ? {
