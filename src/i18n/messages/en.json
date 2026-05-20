@@ -1490,6 +1490,7 @@
       "terminalLabel": "Terminal",
       "agentLabel": "Agent hooks installed",
       "defaultPet": "Mascot awake",
+      "demoPet": "{slug} awake",
       "pendingPet": "{slug} queued"
     },
     "features": {

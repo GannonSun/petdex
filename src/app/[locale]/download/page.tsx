@@ -27,6 +27,12 @@ import { hasLocale } from "@/i18n/config";
 import { buildSetupSteps, parsePendingInstallSlugs } from "./setup-steps";
 
 const SITE_URL = "https://petdex.crafter.run";
+const DEFAULT_PREVIEW_PET_SLUG = "boba";
+const DEFAULT_PREVIEW_PET = {
+  displayName: "Boba",
+  spritesheetPath:
+    "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev/curated/boba/spritesheet.webp",
+};
 
 // Auto-detected /download/opengraph-image is locale-prefixed
 // (/en/download/opengraph-image) and next-intl rewrites that with a
@@ -96,10 +102,18 @@ export default async function DownloadPage({
         ? pendingInstallSlugs[0]
         : pendingInstallSlugs.join(", ")
       : null;
-  const pendingPreviewPet = pendingInstallSlugs?.[0]
-    ? await getPet(pendingInstallSlugs[0])
-    : undefined;
-  const pendingPreviewName = pendingPreviewPet?.displayName ?? pendingLabel;
+  const previewIsPending = (pendingInstallSlugs?.length ?? 0) > 0;
+  const previewSlug = pendingInstallSlugs?.[0] ?? DEFAULT_PREVIEW_PET_SLUG;
+  const resolvedPreviewPet = await getPet(previewSlug);
+  const previewPet = resolvedPreviewPet
+    ? {
+        displayName: resolvedPreviewPet.displayName,
+        spritesheetPath: resolvedPreviewPet.spritesheetPath,
+      }
+    : previewSlug === DEFAULT_PREVIEW_PET_SLUG
+      ? DEFAULT_PREVIEW_PET
+      : null;
+  const previewPetName = previewPet?.displayName ?? pendingLabel;
 
   const features = [
     {
@@ -209,22 +223,17 @@ export default async function DownloadPage({
           </div>
 
           <DesktopActivationPreview
-            pendingLabel={pendingPreviewName}
-            pendingPet={
-              pendingPreviewPet
-                ? {
-                    displayName: pendingPreviewPet.displayName,
-                    spritesheetPath: pendingPreviewPet.spritesheetPath,
-                  }
-                : null
-            }
+            pendingLabel={previewPetName}
+            pendingPet={previewPet}
             title={t("preview.title")}
             status={t("preview.status")}
             terminalLabel={t("preview.terminalLabel")}
             agentLabel={t("preview.agentLabel")}
             petLabel={
-              pendingPreviewName
-                ? t("preview.pendingPet", { slug: pendingPreviewName })
+              previewPetName
+                ? previewIsPending
+                  ? t("preview.pendingPet", { slug: previewPetName })
+                  : t("preview.demoPet", { slug: previewPetName })
                 : t("preview.defaultPet")
             }
           />

@@ -1490,6 +1490,7 @@
       "terminalLabel": "Terminal",
       "agentLabel": "Hooks de agentes instalados",
       "defaultPet": "Mascota despierta",
+      "demoPet": "{slug} despierta",
       "pendingPet": "{slug} en cola"
     },
     "features": {

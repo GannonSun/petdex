@@ -1,6 +1,8 @@
 "use client";
 
-import { Apple, ArrowDownToLine, Clock, Terminal } from "lucide-react";
+import Image from "next/image";
+
+import { Apple, ArrowDownToLine, Clock } from "lucide-react";
 
 import {
   type MacArch,
@@ -57,23 +59,30 @@ export function DownloadCTA({
   return (
     <div className="mt-8 grid w-full min-w-0 gap-3">
       <div className="min-w-0 overflow-hidden rounded-lg border border-brand/20 bg-surface p-3 shadow-[0_18px_48px_-38px_rgba(15,23,42,0.55)]">
-        <div className="mb-3 flex items-center gap-2 px-1">
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-brand text-on-inverse">
-            <Terminal className="size-4" />
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+          <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-brand/20 bg-background shadow-sm">
+            <Image
+              src="/brand/petdex-desktop-icon.png"
+              alt=""
+              fill
+              className="object-contain p-1"
+              sizes="44px"
+            />
           </span>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-semibold text-foreground">
               {primaryLabel}
             </p>
-            <p className="text-xs text-muted-2">{cliSubtext}</p>
+            <p className="mt-0.5 text-sm leading-5 text-muted-2">
+              {cliSubtext}
+            </p>
           </div>
+          <CommandLine
+            command={cliCommand}
+            source="download-hero-primary"
+            className="!h-10 w-full min-w-0 max-w-full !rounded-lg !border-border-base !bg-background !px-3 !py-2 !text-[12px] sm:w-auto sm:min-w-[260px] sm:max-w-[340px]"
+          />
         </div>
-        <CommandLine
-          command={cliCommand}
-          source="download-hero-primary"
-          wrap
-          className="min-h-14 w-full min-w-0 max-w-full !rounded-lg !border-brand/20 !bg-surface-muted/60 !px-4 !py-3 !text-[12px] sm:!text-sm"
-        />
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

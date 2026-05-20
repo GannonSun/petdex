@@ -1703,6 +1703,8 @@
       "agentLabel__fixme": true,
       "defaultPet": "宠物已唤醒",
       "defaultPet__fixme": true,
+      "demoPet": "{slug} 已唤醒",
+      "demoPet__fixme": true,
       "pendingPet": "{slug} 已排队",
       "pendingPet__fixme": true
     },
