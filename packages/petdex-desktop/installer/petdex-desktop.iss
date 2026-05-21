@@ -18,6 +18,7 @@ OutputBaseFilename=PetdexSetup-{#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -39,9 +40,9 @@ Source: "..\zig-out\bin\petdex-desktop.exe"; DestDir: "{app}"; Flags: ignorevers
 Source: "default-pets\bao\*"; DestDir: "{localappdata}\.petdex\pets\bao"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Petdex"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\Petdex"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall Petdex"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Petdex"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\Petdex"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Petdex"; Flags: nowait postinstall skipifsilent; Tasks: launch

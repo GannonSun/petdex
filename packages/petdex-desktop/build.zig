@@ -225,6 +225,10 @@ fn linkPlatform(b: *std.Build, app_mod: *std.Build.Module, exe: *std.Build.Step.
             .file = b.path("src/windows_native_host.cpp"),
             .flags = &.{ "-std=c++17", "-DUNICODE", "-D_UNICODE" },
         });
+        app_mod.addWin32ResourceFile(.{
+            .file = b.path("src/windows_resources.rc"),
+            .include_paths = &.{b.path(".")},
+        });
         app_mod.linkSystemLibrary("user32", .{});
         app_mod.linkSystemLibrary("gdi32", .{});
         app_mod.linkSystemLibrary("ole32", .{});
