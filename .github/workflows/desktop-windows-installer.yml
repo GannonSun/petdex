@@ -14,6 +14,8 @@ jobs:
     name: Build Windows installer
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout petdex
@@ -25,10 +27,32 @@ jobs:
           git clone --depth 1 --branch feature/window-resize https://github.com/Railly/zero-native.git "$env:GITHUB_WORKSPACE\zero-native"
           "ZERO_NATIVE_PATH=$env:GITHUB_WORKSPACE\zero-native" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Install Zig 0.16.0
-        uses: mlugg/setup-zig@v1
-        with:
-          version: "0.16.0"
+      - name: Install Zig
+        shell: pwsh
+        run: |
+          $index = Invoke-RestMethod -Uri "https://ziglang.org/download/index.json"
+          $release = $index.PSObject.Properties["0.16.0"].Value
+          if (-not $release) {
+            throw "Zig 0.16.0 is not listed in https://ziglang.org/download/index.json"
+          }
+          $target = $release.PSObject.Properties["x86_64-windows"].Value
+          if (-not $target -or -not $target.tarball) {
+            throw "Zig 0.16.0 x86_64-windows tarball is not listed in download index"
+          }
+
+          $zigArchive = Join-Path $env:RUNNER_TEMP "zig.zip"
+          $zigRoot = Join-Path $env:RUNNER_TEMP "zig"
+          New-Item -ItemType Directory -Force -Path $zigRoot | Out-Null
+          Invoke-WebRequest -Uri $target.tarball -OutFile $zigArchive
+          Expand-Archive -Path $zigArchive -DestinationPath $zigRoot
+
+          $zigExe = Get-ChildItem -Path $zigRoot -Filter "zig.exe" -Recurse | Select-Object -First 1
+          if (-not $zigExe) {
+            throw "zig.exe was not found after extracting $($target.tarball)"
+          }
+          $zigDir = Split-Path $zigExe.FullName
+          $zigDir | Out-File -FilePath $env:GITHUB_PATH -Append
+          & $zigExe.FullName version
 
       - name: Install Inno Setup
         shell: pwsh
