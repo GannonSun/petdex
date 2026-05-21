@@ -1717,6 +1717,10 @@ fn homeDirFromEnv(env_map: *std.process.Environ.Map) ?[]const u8 {
     return env_map.get("USERPROFILE");
 }
 
+fn localAppDataDirFromEnv(env_map: *std.process.Environ.Map) ?[]const u8 {
+    return env_map.get("LOCALAPPDATA");
+}
+
 // Returns every existing pets root in priority order. Callers must
 // own and free the inner slices. Empty result means no canonical
 // pets root exists at all (fresh install, or HOME without .petdex
@@ -1733,6 +1737,14 @@ fn resolvePetsRoots(allocator: std.mem.Allocator, io: std.Io, env_map: *std.proc
     errdefer {
         for (roots.items) |r| allocator.free(r);
         roots.deinit(allocator);
+    }
+    if (localAppDataDirFromEnv(env_map)) |local_app_data| {
+        const local_path = try std.fs.path.join(allocator, &.{ local_app_data, ".petdex", "pets" });
+        if (pathExists(io, local_path)) {
+            try roots.append(allocator, local_path);
+        } else {
+            allocator.free(local_path);
+        }
     }
     const petdex_path = try std.fs.path.join(allocator, &.{ home, ".petdex", "pets" });
     if (pathExists(io, petdex_path)) {
