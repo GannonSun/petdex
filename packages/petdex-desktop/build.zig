@@ -5,6 +5,7 @@ const PlatformOption = enum {
     null,
     macos,
     linux,
+    win32,
 };
 
 const TraceOption = enum {
@@ -33,7 +34,7 @@ const ZERO_NATIVE_FALLBACK = "../../zero-native";
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const platform_option = b.option(PlatformOption, "platform", "Desktop backend: auto, null, macos, linux") orelse .auto;
+    const platform_option = b.option(PlatformOption, "platform", "Desktop backend: auto, null, macos, linux, win32") orelse .auto;
     const trace_option = b.option(TraceOption, "trace", "Trace output: off, events, runtime, all") orelse .events;
     const debug_overlay = b.option(bool, "debug-overlay", "Enable debug overlay output") orelse false;
     const automation_enabled = b.option(bool, "automation", "Enable zero-native automation artifacts") orelse false;
@@ -41,9 +42,10 @@ pub fn build(b: *std.Build) void {
     const web_engine_override = b.option(WebEngineOption, "web-engine", "Override app.zon web engine: system, chromium");
     const cef_dir_override = b.option([]const u8, "cef-dir", "Override CEF root directory for Chromium builds");
     const cef_auto_install_override = b.option(bool, "cef-auto-install", "Override app.zon CEF auto-install setting");
+    const webview2_path = b.option([]const u8, "webview2-path", "Path to Microsoft.Web.WebView2 NuGet package root") orelse "third_party/webview2";
     const zero_native_path = resolveZeroNativePath(b);
     const selected_platform: PlatformOption = switch (platform_option) {
-        .auto => if (target.result.os.tag == .macos) .macos else if (target.result.os.tag == .linux) .linux else .null,
+        .auto => if (target.result.os.tag == .macos) .macos else if (target.result.os.tag == .linux) .linux else if (target.result.os.tag == .windows) .win32 else .null,
         else => platform_option,
     };
     if (selected_platform == .macos and target.result.os.tag != .macos) {
@@ -51,6 +53,9 @@ pub fn build(b: *std.Build) void {
     }
     if (selected_platform == .linux and target.result.os.tag != .linux) {
         @panic("-Dplatform=linux requires a Linux target");
+    }
+    if (selected_platform == .win32 and target.result.os.tag != .windows) {
+        @panic("-Dplatform=win32 requires a Windows target");
     }
     const app_web_engine = appWebEngineConfig();
     const web_engine = web_engine_override orelse app_web_engine.web_engine;
@@ -67,6 +72,7 @@ pub fn build(b: *std.Build) void {
         .null => "null",
         .macos => "macos",
         .linux => "linux",
+        .win32 => "win32",
     });
     options.addOption([]const u8, "trace", @tagName(trace_option));
     options.addOption([]const u8, "web_engine", @tagName(web_engine));
@@ -82,11 +88,12 @@ pub fn build(b: *std.Build) void {
     const app_mod = localModule(b, target, optimize, "src/main.zig");
     app_mod.addImport("zero-native", zero_native_mod);
     app_mod.addImport("runner", runner_mod);
+    app_mod.addImport("build_options", options_mod);
     const exe = b.addExecutable(.{
         .name = app_exe_name,
         .root_module = app_mod,
     });
-    linkPlatform(b, app_mod, exe, selected_platform, web_engine, zero_native_path, cef_dir, cef_auto_install);
+    linkPlatform(b, app_mod, exe, selected_platform, web_engine, zero_native_path, cef_dir, cef_auto_install, webview2_path);
     b.installArtifact(exe);
 
     const run = b.addRunArtifact(exe);
@@ -162,7 +169,8 @@ fn macosSdkPath(b: *std.Build) ?[]const u8 {
     return trimmed;
 }
 
-fn linkPlatform(b: *std.Build, app_mod: *std.Build.Module, exe: *std.Build.Step.Compile, platform: PlatformOption, web_engine: WebEngineOption, zero_native_path: []const u8, cef_dir: []const u8, cef_auto_install: bool) void {
+fn linkPlatform(b: *std.Build, app_mod: *std.Build.Module, exe: *std.Build.Step.Compile, platform: PlatformOption, web_engine: WebEngineOption, zero_native_path: []const u8, cef_dir: []const u8, cef_auto_install: bool, webview2_path: []const u8) void {
+    _ = webview2_path;
     if (platform == .macos) {
         // Add the macOS SDK framework directories explicitly. This is
         // a no-op when target == host (Zig already injects them), but
@@ -208,6 +216,18 @@ fn linkPlatform(b: *std.Build, app_mod: *std.Build.Module, exe: *std.Build.Step.
         app_mod.linkSystemLibrary("gtk4", .{});
         app_mod.linkSystemLibrary("webkitgtk-6.0", .{});
         app_mod.linkSystemLibrary("c", .{});
+    } else if (platform == .win32) {
+        app_mod.addSystemIncludePath(b.path("src"));
+        app_mod.addCSourceFile(.{
+            .file = b.path("src/windows_native_host.cpp"),
+            .flags = &.{ "-std=c++17", "-DUNICODE", "-D_UNICODE" },
+        });
+        app_mod.linkSystemLibrary("user32", .{});
+        app_mod.linkSystemLibrary("gdi32", .{});
+        app_mod.linkSystemLibrary("ole32", .{});
+        app_mod.linkSystemLibrary("windowscodecs", .{});
+        app_mod.linkSystemLibrary("version", .{});
+        app_mod.linkSystemLibrary("c++", .{});
     }
 }
 
