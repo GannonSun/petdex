@@ -546,21 +546,21 @@ function CollectionsPanel({
         Featured collection
       </p>
       <h3 className="mt-3 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-        {collection!.title}
+        {collection?.title}
       </h3>
       <p className="mt-3 max-w-3xl text-base leading-7 text-muted-2">
-        {collection!.description}
+        {collection?.description}
       </p>
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <Link
-          href={`/collections/${collection!.slug}`}
+          href={`/collections/${collection?.slug}`}
           className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
         >
           View collection
         </Link>
         <span className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-          {collection!.petSlugs.length}{" "}
-          {collection!.petSlugs.length === 1 ? "pet" : "pets"} · @{publicHandle}
+          {collection?.petSlugs.length}{" "}
+          {collection?.petSlugs.length === 1 ? "pet" : "pets"} · @{publicHandle}
         </span>
       </div>
     </section>

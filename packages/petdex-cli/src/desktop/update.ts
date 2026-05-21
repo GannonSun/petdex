@@ -36,6 +36,7 @@ import {
 } from "./install.js";
 import {
   desktopStatus,
+  isPetdexPidAlive,
   startDesktop,
   stopDesktop,
   waitForPortRelease,
@@ -276,7 +277,29 @@ export async function runUpdate(
         ? "Stopping running petdex-desktop"
         : `${pc.dim("•")} Stopping running petdex-desktop`,
     );
-    await stopDesktop();
+    const stopResult = await stopDesktop();
+    // On Windows the running .exe is file-locked until the process
+    // fully exits. If stopDesktop() failed AND the process is still
+    // alive, the rename in commitDesktopAssets would throw EPERM.
+    // Surface this as a clear actionable error rather than a
+    // confusing filesystem failure.
+    if (process.platform === "win32" && !stopResult.ok) {
+      const recheck = desktopStatus();
+      if (recheck.state === "running" && isPetdexPidAlive(recheck.pid)) {
+        throw new Error(
+          "Cannot replace petdex-desktop-win32-x64.exe: process is still running. " +
+            "Run `petdex desktop stop` first.",
+        );
+      }
+    }
+  }
+
+  // On Windows, give the OS a moment to release the file lock after
+  // the process exits. taskkill returns before the kernel fully
+  // closes all handles, so a rename immediately after can still get
+  // EPERM on a recently-exited process.
+  if (process.platform === "win32" && wasRunning) {
+    await new Promise((res) => setTimeout(res, 500));
   }
 
   // Phase 3: commit. commitDesktopAssets rolls back from .prev

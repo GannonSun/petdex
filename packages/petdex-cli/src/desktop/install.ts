@@ -61,7 +61,7 @@ type Target = {
   assetSuffix: string;
 };
 
-function detectTarget(): Target {
+export function detectTarget(): Target {
   const os = nodePlatform();
   const arch = nodeArch();
   const osLabel =
@@ -100,7 +100,14 @@ export function desktopBinPath(): string {
   if (nodePlatform() === "darwin") {
     const appCandidates = [
       "/Applications/Petdex.app/Contents/MacOS/petdex-desktop",
-      path.join(homedir(), "Applications", "Petdex.app", "Contents", "MacOS", "petdex-desktop"),
+      path.join(
+        homedir(),
+        "Applications",
+        "Petdex.app",
+        "Contents",
+        "MacOS",
+        "petdex-desktop",
+      ),
     ];
     for (const candidate of appCandidates) {
       if (existsSync(candidate)) return candidate;
@@ -119,7 +126,15 @@ export function sidecarPath(): string {
   if (nodePlatform() === "darwin") {
     const appCandidates = [
       "/Applications/Petdex.app/Contents/Resources/sidecar/server.js",
-      path.join(homedir(), "Applications", "Petdex.app", "Contents", "Resources", "sidecar", "server.js"),
+      path.join(
+        homedir(),
+        "Applications",
+        "Petdex.app",
+        "Contents",
+        "Resources",
+        "sidecar",
+        "server.js",
+      ),
     ];
     for (const candidate of appCandidates) {
       if (existsSync(candidate)) return candidate;
@@ -471,7 +486,10 @@ export async function updateAppBundleFromDmg(
     `petdex-${randomBytes(8).toString("hex")}-${dmgAsset.name}`,
   );
 
-  const downloaded = await stageDownload(dmgAsset.browser_download_url, dmgPath);
+  const downloaded = await stageDownload(
+    dmgAsset.browser_download_url,
+    dmgPath,
+  );
   // stageDownload returns { tmpPath, destPath } where destPath is what
   // we passed in. We want the actual file we just wrote — that's the
   // .tmp suffixed one. Rename to drop the suffix so hdiutil sees a
@@ -482,9 +500,13 @@ export async function updateAppBundleFromDmg(
   const { spawnSync } = await import("node:child_process");
   // Mount nobrowse so Finder doesn't pop a window while we work.
   // -quiet keeps stdout clean for the caller's spinner.
-  const mount = spawnSync("hdiutil", ["attach", "-nobrowse", "-quiet", dmgPath], {
-    encoding: "utf8",
-  });
+  const mount = spawnSync(
+    "hdiutil",
+    ["attach", "-nobrowse", "-quiet", dmgPath],
+    {
+      encoding: "utf8",
+    },
+  );
   if (mount.status !== 0) {
     throw new Error(
       `hdiutil attach failed (exit ${mount.status}): ${mount.stderr || mount.stdout || "no output"}`,
@@ -527,7 +549,9 @@ export async function updateAppBundleFromDmg(
   } finally {
     // Always unmount, even on ditto failure — leaving phantom volumes
     // around is the kind of thing that bites you 6 weeks later.
-    spawnSync("hdiutil", ["detach", "-quiet", mountPoint], { encoding: "utf8" });
+    spawnSync("hdiutil", ["detach", "-quiet", mountPoint], {
+      encoding: "utf8",
+    });
     // Remove the staged DMG. Best-effort: a leaked /tmp file isn't a
     // crisis but there's no reason to litter.
     try {
@@ -575,8 +599,7 @@ export type RunInstallDesktopResult = {
 // (404 page, facet pages). Easy to swap if we later want to make
 // this configurable per-release.
 const DEFAULT_PET_SLUG = "boba";
-const PETDEX_URL =
-  process.env.PETDEX_URL ?? "https://petdex.crafter.run";
+const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.crafter.run";
 
 // Hosts we trust for serving pet assets (spritesheet + pet.json).
 // Mirrored from src/lib/url-allowlist.ts (the server-side validation
@@ -605,12 +628,11 @@ export function isTrustedAssetUrl(url: string): boolean {
   }
 }
 
-// Lazy HOME lookup so tests can swap process.env.HOME and have the
-// pets dirs land in their tmpdir. os.homedir() ignores HOME on
-// macOS — we prefer process.env.HOME, falling back to homedir() when
-// unset (e.g. in real CLI usage).
-function homeDir(): string {
-  return process.env.HOME ?? homedir();
+export function homeDir(): string {
+  if (nodePlatform() === "win32") {
+    return process.env.USERPROFILE ?? process.env.HOME ?? homedir();
+  }
+  return process.env.HOME ?? process.env.USERPROFILE ?? homedir();
 }
 
 function petsRoot(): string {
@@ -922,8 +944,8 @@ function formatBytes(bytes: number): string {
 }
 
 function tildeify(p: string): string {
-  const home = process.env.HOME;
-  if (home && p.startsWith(home)) return `~${p.slice(home.length)}`;
+  const home = homeDir();
+  if (p.startsWith(home)) return `~${p.slice(home.length)}`;
   return p;
 }
 

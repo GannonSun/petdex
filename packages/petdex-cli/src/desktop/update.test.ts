@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -77,7 +82,7 @@ async function startFakeSidecar(opts: FakeSidecarOptions): Promise<{
 }
 
 async function stopFakeSidecar(server: Server | null) {
-  if (!server || !server.listening) return;
+  if (!server?.listening) return;
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 

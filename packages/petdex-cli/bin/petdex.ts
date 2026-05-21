@@ -130,6 +130,15 @@ async function main() {
     return;
   }
 
+  // `petdex mcp-server` is also a hot path run as a subprocess by
+  // Antigravity. Any stdout output (telemetry notice, help text)
+  // before the client sends `initialize` breaks the MCP handshake.
+  if (cmd === "mcp-server") {
+    const { runMcpServer } = await import("../src/hooks/mcp-server.js");
+    await runMcpServer();
+    return;
+  }
+
   if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "help") {
     printHelp();
     return;
@@ -228,6 +237,7 @@ function printHelp() {
       `    ${pc.bold("install")} <slug...>  Install one or more pets into ~/.petdex/pets and ~/.codex/pets`,
       `    ${pc.bold("install desktop")}    Install the petdex-desktop binary (alternative to the .dmg)`,
       `    ${pc.bold("list")}               List approved pets`,
+      `    ${pc.bold("mcp-server")}          Start the MCP protocol server for Antigravity integration`,
       `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
       `    ${pc.bold("toggle")}             One-shot wake/sleep. Flips the mascot on or off depending on current state`,
       `    ${pc.bold("up")}                 Force-wake the mascot. Enables hooks AND launches petdex-desktop`,
@@ -496,7 +506,7 @@ async function cmdInstall(args: string[]) {
   }
 }
 
-async function download(url: string, dest: string): Promise<void> {
+async function _download(url: string, dest: string): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`download ${url} → ${res.status}`);
@@ -725,7 +735,7 @@ async function cmdEdit(args: string[]): Promise<void> {
   }
 
   function flagValue(flag: string): string | null {
-    const idx = args.findIndex((a) => a === flag);
+    const idx = args.indexOf(flag);
     if (idx === -1) return null;
     const val = args[idx + 1];
     return typeof val === "string" && !val.startsWith("--") ? val : null;
@@ -1491,7 +1501,7 @@ async function cmdInit(): Promise<void> {
     );
   }
 
-  const { installedAgents } = await runHooksInstall();
+  const { installedAgents: _installedAgents } = await runHooksInstall();
 
   // Auto-start the mascot. Skipping this used to leave the user with
   // a working hook chain but no visible mascot — they'd run /petdex

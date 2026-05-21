@@ -346,15 +346,18 @@ const TRUSTED_HOST = "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev";
 
 describe("installStarterPet", () => {
   const realHome = process.env.HOME;
+  const realUserProfile = process.env.USERPROFILE;
   let tmpHome: string;
 
   beforeEach(() => {
     tmpHome = mkdtempSync(join(tmpdir(), "petdex-starter-test-"));
     process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
   });
 
   afterEach(() => {
     process.env.HOME = realHome;
+    process.env.USERPROFILE = realUserProfile;
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
@@ -849,15 +852,18 @@ describe("isTrustedAssetUrl", () => {
 
 describe("hasAnyInstalledPet usability", () => {
   const realHome = process.env.HOME;
+  const realUserProfile = process.env.USERPROFILE;
   let tmpHome: string;
 
   beforeEach(() => {
     tmpHome = mkdtempSync(join(tmpdir(), "petdex-usable-test-"));
     process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
   });
 
   afterEach(() => {
     process.env.HOME = realHome;
+    process.env.USERPROFILE = realUserProfile;
     rmSync(tmpHome, { recursive: true, force: true });
   });
 

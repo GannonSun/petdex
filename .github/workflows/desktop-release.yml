@@ -94,9 +94,54 @@ jobs:
           name: petdex-desktop-sidecar
           path: packages/petdex-desktop/sidecar/server.js
 
+  build-windows:
+    name: build win32-x64
+    runs-on: windows-2022
+    steps:
+      - name: Checkout petdex
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Rust stable (x86_64-pc-windows-msvc)
+        # windows-2022 ships with Rust but pinning the toolchain + target
+        # makes the job reproducible across runner image updates.
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust/Cargo build artefacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/petdex-desktop-windows/src-tauri -> target
+
+      - name: Install Tauri CLI
+        # Install into the local cargo bin so the version is locked to what
+        # tauri.conf.json declares, not whatever the runner image happens to
+        # have. `--locked` ensures Cargo.lock is respected.
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build petdex-desktop-win32-x64.exe
+        # `--bundles none` skips NSIS/WiX installer generation (we ship the
+        # bare .exe per the CLI asset contract). The binary name is driven by
+        # the [[bin]] entry in Cargo.toml: `petdex-desktop-win32-x64`.
+        working-directory: packages/petdex-desktop-windows
+        run: |
+          cargo tauri build --bundles none
+          $exe = "src-tauri\target\release\petdex-desktop-win32-x64.exe"
+          if (-not (Test-Path $exe)) { throw "Binary not found at $exe" }
+          Write-Output "Binary size: $((Get-Item $exe).Length) bytes"
+          Copy-Item $exe "petdex-desktop-win32-x64.exe"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: petdex-desktop-win32-x64
+          path: packages/petdex-desktop-windows/petdex-desktop-win32-x64.exe
+
   release:
     name: publish github release
-    needs: [build, sidecar]
+    needs: [build, build-windows, sidecar]
     runs-on: ubuntu-latest
     permissions:
       contents: write

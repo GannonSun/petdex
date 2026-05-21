@@ -577,12 +577,12 @@ function AutomationEvidence({ review }: { review: SubmissionReview | null }) {
   return (
     <details className="rounded-xl border border-border-base bg-surface-muted/50 px-3 py-2 text-xs text-muted-2">
       <summary className="cursor-pointer font-mono text-[10px] tracking-[0.16em] text-muted-3 uppercase">
-        Automation evidence
+        {t("automationEvidence")}
       </summary>
       <div className="mt-2 space-y-2">
         <p>
-          {review.summary ?? "No summary."} Confidence: {review.confidence ?? 0}
-          %.
+          {review.summary ?? t("noSummary")}{" "}
+          {t("confidence", { confidence: review.confidence ?? 0 })}
         </p>
         <p className="font-mono text-[10px] tracking-[0.12em] text-muted-3 uppercase">
           {review.reasonCode ?? "no_reason"} ·{" "}
@@ -599,6 +599,20 @@ function AutomationEvidence({ review }: { review: SubmissionReview | null }) {
             items={checks.assets.reasons}
           />
         ) : null}
+        {checks.security?.findings?.length ? (
+          <EvidenceGroup
+            title={t("evidenceSecurity")}
+            items={checks.security.findings.map(
+              (finding) =>
+                `${finding.code} (${finding.path}): ${finding.evidence}`,
+            )}
+          />
+        ) : checks.security?.reasons?.length ? (
+          <EvidenceGroup
+            title={t("evidenceSecurity")}
+            items={checks.security.reasons}
+          />
+        ) : null}
         {checks.policy?.flags?.length ? (
           <EvidenceGroup
             title={t("evidencePolicy")}
@@ -611,6 +625,18 @@ function AutomationEvidence({ review }: { review: SubmissionReview | null }) {
           <EvidenceGroup
             title={t("evidencePolicy")}
             items={checks.policy.reasons}
+          />
+        ) : null}
+        {checks.policy?.visualText?.length ? (
+          <EvidenceGroup
+            title={t("evidenceVisualText")}
+            items={checks.policy.visualText}
+          />
+        ) : null}
+        {checks.policy?.visualSignals?.length ? (
+          <EvidenceGroup
+            title={t("evidenceVisualSignals")}
+            items={checks.policy.visualSignals}
           />
         ) : null}
         {duplicateMatches.length > 0 ? (
