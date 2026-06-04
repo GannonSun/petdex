@@ -233,6 +233,7 @@ fn linkPlatform(b: *std.Build, app_mod: *std.Build.Module, exe: *std.Build.Step.
         app_mod.linkSystemLibrary("gdi32", .{});
         app_mod.linkSystemLibrary("ole32", .{});
         app_mod.linkSystemLibrary("windowscodecs", .{});
+        app_mod.linkSystemLibrary("wininet", .{});
         app_mod.linkSystemLibrary("version", .{});
         app_mod.linkSystemLibrary("c++", .{});
     }

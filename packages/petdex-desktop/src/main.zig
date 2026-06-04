@@ -2283,6 +2283,7 @@ fn prepareAssetRoot(
     io: std.Io,
     config_dir: []const u8,
     html: []const u8,
+    petdex_json: []const u8,
     sprite_ext: []const u8,
     sprite_bytes: []const u8,
 ) ![]u8 {
@@ -2306,6 +2307,7 @@ fn prepareAssetRoot(
     defer root_dir.close(io);
 
     try writeFileAll(io, root_dir, "index.html", html);
+    try writeFileAll(io, root_dir, "petdex.json", petdex_json);
     const sprite_name = if (std.mem.eql(u8, sprite_ext, "png")) "spritesheet.png" else "spritesheet.webp";
     try writeFileAll(io, root_dir, sprite_name, sprite_bytes);
     if (!std.mem.eql(u8, sprite_ext, "webp")) {
@@ -2445,7 +2447,7 @@ pub fn main(init: std.process.Init) !void {
     const html_doc = try buildHtml(allocator, petdex_json);
     defer allocator.free(html_doc);
 
-    const asset_root = try prepareAssetRoot(allocator, init.io, config_dir, html_doc, sprite.ext, sprite.bytes);
+    const asset_root = try prepareAssetRoot(allocator, init.io, config_dir, html_doc, petdex_json, sprite.ext, sprite.bytes);
     defer allocator.free(asset_root);
 
     try copyAllSpritesheets(allocator, init.io, asset_root, pets.items);
